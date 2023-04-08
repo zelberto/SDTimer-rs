@@ -36,13 +36,13 @@ struct Task {
 }
 
 struct MyApp {
-    start_time: Instant,
+    start_time: Option<Instant>,
     /// edge detector for seconds
     sec: u64,
     stream_handle: OutputStreamHandle,
-    //beepit: bool,
+    beepit: bool,
     settings_is_open: bool,
-    //autolyse: Task,
+    curr_step: usize,
     tasks: Vec<Task>,
 }
 
@@ -50,8 +50,14 @@ impl MyApp {
     fn new(stream_handle: OutputStreamHandle) -> Self {
         let mut tasks = vec![];
         let mut time = 0;
-        for (name, own_time) in [("Autolyse", 60), ("S&F No.1", 30), ("Bulk", 120)] {
-            time += 60 * own_time;
+        for (name, own_time) in [
+            ("Autolyse", 30),
+            ("S&F No.1", 30),
+            ("Bulk", 120),
+            ("Shaping", 30),
+            ("Proofing", 120),
+        ] {
+            time += 1 * own_time; // time is cumulative of all task's times
             tasks.push(Task {
                 name: name.to_owned(),
                 end_time: time,
@@ -59,10 +65,11 @@ impl MyApp {
             })
         }
         Self {
-            start_time: Instant::now(),
+            start_time: None,
             sec: 0,
+            curr_step: 0,
             stream_handle,
-            // beepit: false,
+            beepit: false,
             settings_is_open: false,
             //autolyse: (60, false),
             tasks,
@@ -84,16 +91,33 @@ impl eframe::App for MyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Sourdough Timer");
 
-            let s = self.start_time.elapsed().as_secs();
-            let beepit = s >= self.autolyse.0 && !self.autolyse.1;
+            // let running_time = self.start_time.elapsed().as_secs();
+            let mut running_time = 0;
+            if let Some(start_time) = self.start_time {
+                running_time = start_time.elapsed().as_secs();
+
+                for i in 0..self.tasks.len() {
+                    if running_time < self.tasks[i].end_time {
+                        if self.curr_step != i {
+                            self.beepit = true;
+                        }
+                        self.curr_step = i;
+                        break;
+                    }
+                }
+            }
+
+            // let running_time = self.start_time.elapsed().as_millis() as u64 / 10;
+            // let beepit = running_time >= self.tasks[self.curr_step].end_time
+            // && !self.tasks[self.curr_step].silenced;
 
             ui.horizontal(|ui| {
-                ui.label("Your name: ");
+                ui.label("Elapsed Time: ");
                 //let s = (self.start_time.elapsed().as_millis() / 200) as u64;
 
-                if beepit && s != self.sec {
+                if self.beepit && running_time != self.sec {
                     self.beep();
-                    self.sec = s;
+                    self.sec = running_time;
                 }
 
                 //if self.beepit && s != self.sec {
@@ -102,25 +126,31 @@ impl eframe::App for MyApp {
                 //    self.beep();
                 //    self.sec = s;
                 //}
-
-                let h = 0;
-                let m = 0;
-                ui.text_edit_singleline(&mut format!("{}:{}:{}", h, m, s));
+                let s = running_time % 60;
+                let m = (running_time / 60) % 60;
+                let h = (running_time / 60) / 60;
+                ui.label(format!("{:02}:{:02}:{:02}", h, m, s)); // zero padded string
             });
+            ui.label(format!("Current Step: {}", self.tasks[self.curr_step].name));
 
             ui.add(egui::ProgressBar::new(0.0));
             if ui
-                .add_enabled(beepit, egui::Button::new("Silence Alarm"))
+                .add_enabled(self.beepit, egui::Button::new("Silence Alarm"))
                 .clicked()
             {
-                self.start_time = Instant::now();
-                self.sec = 0;
-                self.autolyse.1 = true;
+                //self.start_time = Instant::now();
+                //self.sec = 0;
+                //self.tasks[0].silenced = true;
+                self.beepit = false;
             }
 
             if ui.button("Settings").clicked() {
                 //self.beep();
                 self.settings_is_open = !self.settings_is_open;
+            }
+
+            if ui.button("Start").clicked() {
+                self.start_time = Some(Instant::now());
             }
 
             let window = egui::Window::new("Settings")
